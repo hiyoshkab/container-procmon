@@ -2,9 +2,16 @@ package procmon
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+)
+
+var (
+	procRoot           = "/proc"
+	cgroupMemMaxPathV2 = "/sys/fs/cgroup/memory.max"
+	cgroupMemMaxPathV1 = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 )
 
 type PrevCPU struct {
@@ -12,7 +19,7 @@ type PrevCPU struct {
 	timestamp  time.Time
 }
 
-type PrevSample struct {
+type Sampler struct {
 	prev     map[int]PrevCPU
 	memLimit uint64
 }
@@ -25,10 +32,17 @@ type ProcStats struct {
 }
 
 func readCgroupMemLimit() (uint64, error) {
-	limitData, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	// Try cgroups v2 first
+	limitData, err := os.ReadFile(cgroupMemMaxPathV2)
 	if err != nil {
-		// TODO: Error handle
+		// Fall back to cgroups v1
+		limitData, err = os.ReadFile(cgroupMemMaxPathV1)
+		if err != nil {
+			// TODO: Error handle
+			return 0, err
+		}
 	}
+
 	limitStr := strings.TrimSpace(string(limitData))
 
 	var memLimit uint64
@@ -41,22 +55,22 @@ func readCgroupMemLimit() (uint64, error) {
 	return memLimit, nil
 }
 
-func NewPrevSample() *PrevSample {
+func NewSampler() *Sampler {
 	limit, err := readCgroupMemLimit()
 	if err != nil {
 		// TODO: Error handle
 	}
 
-	return &PrevSample{
+	return &Sampler{
 		prev:     make(map[int]PrevCPU),
 		memLimit: limit,
 	}
 }
 
-func (prevSample *PrevSample) SampleProcs() ([]ProcStats, error) {
-	entries, err := os.ReadDir("/proc")
+func (sampler *Sampler) SampleProcs() ([]ProcStats, error) {
+	entries, err := os.ReadDir(procRoot)
 	if err != nil {
-		println("Error reading /proc with error: ", err.Error())
+		println("Error reading "+procRoot+" with error: ", err.Error())
 		return nil, err
 	}
 
@@ -78,7 +92,7 @@ func (prevSample *PrevSample) SampleProcs() ([]ProcStats, error) {
 
 		seen[pid] = true
 
-		statsPath := "/proc/" + strconv.Itoa(pid) + "/stat"
+		statsPath := filepath.Join(procRoot, strconv.Itoa(pid), "stat")
 		statsData, err := os.ReadFile(statsPath)
 		if err != nil {
 			println("Error reading process stats for PID ", pid, " with error: ", err.Error())
@@ -94,7 +108,7 @@ func (prevSample *PrevSample) SampleProcs() ([]ProcStats, error) {
 
 		// Extract each field after process name
 		fields := strings.Fields(statsStr[procNameEndIdx+2:])
-		if len(fields) < 23 {
+		if len(fields) < 22 {
 			println("Bad format for process fields for PID ", pid)
 			continue
 		}
@@ -105,13 +119,13 @@ func (prevSample *PrevSample) SampleProcs() ([]ProcStats, error) {
 		// #23 RSS
 		uTicks, _ := strconv.ParseUint(fields[11], 10, 64)
 		sTicks, _ := strconv.ParseUint(fields[12], 10, 64)
-		rssPages, _ := strconv.ParseUint(fields[20], 10, 64)
+		rssPages, _ := strconv.ParseUint(fields[21], 10, 64)
 		rssBytes := rssPages * uint64(os.Getpagesize())
 
 		totalTicks := uTicks + sTicks
 
 		cpuPercent := 0.0
-		prevProcStats, exists := prevSample.prev[pid]
+		prevProcStats, exists := sampler.prev[pid]
 		if exists {
 			deltaTicks := totalTicks - prevProcStats.totalTicks
 			deltaTime := now.Sub(prevProcStats.timestamp).Seconds()
@@ -124,8 +138,8 @@ func (prevSample *PrevSample) SampleProcs() ([]ProcStats, error) {
 		}
 
 		memPercent := 0.0
-		if prevSample.memLimit > 0 {
-			memPercent = float64(rssBytes) / float64(prevSample.memLimit) * 100.0
+		if sampler.memLimit > 0 {
+			memPercent = float64(rssBytes) / float64(sampler.memLimit) * 100.0
 		}
 
 		statsList = append(statsList, ProcStats{
@@ -136,16 +150,16 @@ func (prevSample *PrevSample) SampleProcs() ([]ProcStats, error) {
 		})
 
 		// Update prevSample for next sample
-		prevSample.prev[pid] = PrevCPU{
+		sampler.prev[pid] = PrevCPU{
 			totalTicks: totalTicks,
 			timestamp:  now,
 		}
 	}
 
 	// If PID is no longer present, remove it from the previous sample
-	for p := range prevSample.prev {
+	for p := range sampler.prev {
 		if !seen[p] {
-			delete(prevSample.prev, p)
+			delete(sampler.prev, p)
 		}
 	}
 
