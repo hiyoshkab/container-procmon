@@ -1,4 +1,4 @@
-package procmon
+package main
 
 import (
 	"math"
@@ -70,16 +70,16 @@ func TestSampleProcs(t *testing.T) {
 		t.Fatalf("rssBytes = %d, want %d", stats[0].rssBytes, expectedRSSBytes)
 	}
 
-	// Check CPU percent: totalTicks changed from 200 to 300 (100 delta) over ~1 second
-	// cpuPercent = (100 / 100) / 1 * 100 = ~100% (with tolerance for timing)
-	if math.Abs(stats[0].cpuPercent-100.0) > 0.1 {
-		t.Fatalf("cpuPercent = %f, want ~100.0", stats[0].cpuPercent)
+	// Check CPU utilization: totalTicks changed from 200 to 300 (100 delta) over ~1 second
+	// cpuUtilization = (100 / 100) / 1 = ~1.0 (with tolerance for timing)
+	if math.Abs(stats[0].cpuUtilization-1.0) > 0.001 {
+		t.Fatalf("cpuUtilization = %f, want ~1.0", stats[0].cpuUtilization)
 	}
 
-	// Check memory percent: rssBytes / memLimit * 100
-	expectedMemPercent := float64(expectedRSSBytes) / float64(sampler.memLimit) * 100.0
-	if stats[0].memPercent != expectedMemPercent {
-		t.Fatalf("memPercent = %f, want %f", stats[0].memPercent, expectedMemPercent)
+	// Check memory utilization: rssBytes / memLimit
+	expectedMemUtilization := float64(expectedRSSBytes) / float64(sampler.memLimit)
+	if stats[0].memUtilization != expectedMemUtilization {
+		t.Fatalf("memUtilization = %f, want %f", stats[0].memUtilization, expectedMemUtilization)
 	}
 }
 

@@ -1,6 +1,7 @@
-package procmon
+package main
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -25,10 +26,11 @@ type Sampler struct {
 }
 
 type ProcStats struct {
-	pid        int
-	cpuPercent float64
-	memPercent float64
-	rssBytes   uint64
+	pid            int
+	name           string
+	cpuUtilization float64
+	memUtilization float64
+	rssBytes       uint64
 }
 
 func readCgroupMemLimit() (uint64, error) {
@@ -38,7 +40,7 @@ func readCgroupMemLimit() (uint64, error) {
 		// Fall back to cgroups v1
 		limitData, err = os.ReadFile(cgroupMemMaxPathV1)
 		if err != nil {
-			// TODO: Error handle
+			slog.Error("reading cgroup memory limit failed", "err", err)
 			return 0, err
 		}
 	}
@@ -58,7 +60,7 @@ func readCgroupMemLimit() (uint64, error) {
 func NewSampler() *Sampler {
 	limit, err := readCgroupMemLimit()
 	if err != nil {
-		// TODO: Error handle
+		slog.Warn("could not determine memory limit, memory utilization will be 0", "err", err)
 	}
 
 	return &Sampler{
@@ -70,7 +72,7 @@ func NewSampler() *Sampler {
 func (sampler *Sampler) SampleProcs() ([]ProcStats, error) {
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
-		println("Error reading "+procRoot+" with error: ", err.Error())
+		slog.Error("reading proc root failed", "path", procRoot, "err", err)
 		return nil, err
 	}
 
@@ -95,21 +97,26 @@ func (sampler *Sampler) SampleProcs() ([]ProcStats, error) {
 		statsPath := filepath.Join(procRoot, strconv.Itoa(pid), "stat")
 		statsData, err := os.ReadFile(statsPath)
 		if err != nil {
-			println("Error reading process stats for PID ", pid, " with error: ", err.Error())
+			slog.Debug("reading process stat failed", "pid", pid, "err", err)
+			continue
 		}
 
 		// Process name always ends with ')'
 		statsStr := string(statsData)
+		procNameStartIdx := strings.Index(statsStr, "(")
 		procNameEndIdx := strings.LastIndex(statsStr, ")")
+
 		if procNameEndIdx == -1 {
-			println("Bad format for process name for PID ", pid)
+			slog.Debug("bad format for process name", "pid", pid)
 			continue
 		}
+
+		procName := statsStr[procNameStartIdx+1 : procNameEndIdx]
 
 		// Extract each field after process name
 		fields := strings.Fields(statsStr[procNameEndIdx+2:])
 		if len(fields) < 22 {
-			println("Bad format for process fields for PID ", pid)
+			slog.Debug("bad format for process fields", "pid", pid)
 			continue
 		}
 
@@ -124,7 +131,7 @@ func (sampler *Sampler) SampleProcs() ([]ProcStats, error) {
 
 		totalTicks := uTicks + sTicks
 
-		cpuPercent := 0.0
+		cpuUtilization := 0.0
 		prevProcStats, exists := sampler.prev[pid]
 		if exists {
 			deltaTicks := totalTicks - prevProcStats.totalTicks
@@ -133,20 +140,21 @@ func (sampler *Sampler) SampleProcs() ([]ProcStats, error) {
 			if deltaTime > 0 {
 				clkTck := uint64(100) // TODO: Dynamically retrieve clocktick
 				cpuSeconds := float64(deltaTicks) / float64(clkTck)
-				cpuPercent = cpuSeconds / deltaTime * 100.0
+				cpuUtilization = cpuSeconds / deltaTime
 			}
 		}
 
-		memPercent := 0.0
+		memUtilization := 0.0
 		if sampler.memLimit > 0 {
-			memPercent = float64(rssBytes) / float64(sampler.memLimit) * 100.0
+			memUtilization = float64(rssBytes) / float64(sampler.memLimit)
 		}
 
 		statsList = append(statsList, ProcStats{
-			pid:        pid,
-			cpuPercent: cpuPercent,
-			rssBytes:   rssBytes,
-			memPercent: memPercent,
+			pid:            pid,
+			name:           procName,
+			cpuUtilization: cpuUtilization,
+			rssBytes:       rssBytes,
+			memUtilization: memUtilization,
 		})
 
 		// Update prevSample for next sample
