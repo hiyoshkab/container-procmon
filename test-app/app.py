@@ -40,6 +40,15 @@ def _positive_int(name: str, default: int, maximum: int) -> int:
 def _handle_value_error(err: ValueError):
     return jsonify(error=str(err)), 400
 
+@app.route("/", methods=["GET", "POST"])
+def index():
+    return jsonify(
+        endpoints={
+            "/cpu": "burn CPU for a number of seconds. Use seconds and workers query parameters to control the load. example: /cpu?seconds=10&workers=4",
+            "/mem": "allocate memory for a number of seconds. Use seconds and mb query parameters to control the load. example: /mem?seconds=10&mb=128",
+            "/health": "check if the service is healthy"
+        },
+    )
 
 @app.route("/cpu", methods=["GET", "POST"])
 def cpu():
