@@ -1,0 +1,35 @@
+receivers:
+  # Your app pushes metrics here (gRPC 4317 / HTTP 4318).
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  batch:
+    send_batch_size: 8192
+    timeout: 5s
+
+exporters:
+  # Self-hosted Prometheus on ACA (internal ingress, no auth).
+  prometheus_remote_write/local:
+    endpoint: http://prometheus/api/v1/write
+    tls:
+      insecure: true
+    resource_to_telemetry_conversion:
+      enabled: true
+    external_labels:
+      source: otel-collector
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus_remote_write/local]
