@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,6 +16,9 @@ var (
 	cgroupMemMaxPathV1 = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 )
 
+// AT_CLKTCK entry in the ELF auxiliary vector; holds the value of sysconf(_SC_CLK_TCK).
+const atClkTck = 17
+
 type PrevCPU struct {
 	totalTicks uint64
 	timestamp  time.Time
@@ -23,6 +27,7 @@ type PrevCPU struct {
 type Sampler struct {
 	prev     map[int]PrevCPU
 	memLimit uint64
+	clkTck   uint64
 }
 
 type ProcStats struct {
@@ -57,6 +62,38 @@ func readCgroupMemLimit() (uint64, error) {
 	return memLimit, nil
 }
 
+// getClockTicks returns sysconf(_SC_CLK_TCK) by reading AT_CLKTCK from the
+// auxiliary vector, avoiding cgo. Falls back to 100 (the near-universal value).
+func getClockTicks() uint64 {
+	const fallback = 100
+
+	data, err := os.ReadFile(filepath.Join(procRoot, "self", "auxv"))
+	if err != nil {
+		slog.Warn("reading auxv failed, assuming 100 clock ticks/sec", "err", err)
+		return fallback
+	}
+
+	wordSize := strconv.IntSize / 8
+	for i := 0; i+2*wordSize <= len(data); i += 2 * wordSize {
+		var key, val uint64
+		if wordSize == 8 {
+			key = binary.NativeEndian.Uint64(data[i:])
+			val = binary.NativeEndian.Uint64(data[i+8:])
+		} else {
+			key = uint64(binary.NativeEndian.Uint32(data[i:]))
+			val = uint64(binary.NativeEndian.Uint32(data[i+4:]))
+		}
+		if key == atClkTck {
+			if val > 0 {
+				slog.Debug("Clock Ticks: ", "value", val)
+				return val
+			}
+			break
+		}
+	}
+	return fallback
+}
+
 func NewSampler() *Sampler {
 	limit, err := readCgroupMemLimit()
 	if err != nil {
@@ -66,6 +103,7 @@ func NewSampler() *Sampler {
 	return &Sampler{
 		prev:     make(map[int]PrevCPU),
 		memLimit: limit,
+		clkTck:   getClockTicks(),
 	}
 }
 
@@ -138,8 +176,7 @@ func (sampler *Sampler) SampleProcs() ([]ProcStats, error) {
 			deltaTime := now.Sub(prevProcStats.timestamp).Seconds()
 
 			if deltaTime > 0 {
-				clkTck := uint64(100) // TODO: Dynamically retrieve clocktick
-				cpuSeconds := float64(deltaTicks) / float64(clkTck)
+				cpuSeconds := float64(deltaTicks) / float64(sampler.clkTck)
 				cpuUtilization = cpuSeconds / deltaTime
 			}
 		}
