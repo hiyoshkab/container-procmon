@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	metricapi "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/metric"
@@ -137,9 +138,14 @@ func newResource() (*resource.Resource, error) {
 }
 
 func newMeterProvider(res *resource.Resource, duration time.Duration) (*metric.MeterProvider, error) {
-	metricExporter, err := stdoutmetric.New()
+	var metricExporter metric.Exporter
+	metricExporter, err := otlpmetricgrpc.New(context.Background())
 	if err != nil {
-		return nil, err
+		slog.Warn("creating OTLP metric exporter failed, falling back to stdout", "err", err)
+		metricExporter, err = stdoutmetric.New()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	meterProvider := metric.NewMeterProvider(
@@ -147,5 +153,6 @@ func newMeterProvider(res *resource.Resource, duration time.Duration) (*metric.M
 		metric.WithReader(metric.NewPeriodicReader(metricExporter,
 			metric.WithInterval(duration))),
 	)
+
 	return meterProvider, nil
 }

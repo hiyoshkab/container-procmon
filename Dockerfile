@@ -1,3 +1,4 @@
+# Build go app
 FROM golang:1.26 AS build
 WORKDIR /app
 
