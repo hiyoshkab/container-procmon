@@ -1,0 +1,187 @@
+name: Terraform Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DESTROY to confirm deletion of the deployment"
+        type: string
+        required: true
+      container_image:
+        description: "Current full image reference (required by the Terraform configuration)"
+        type: string
+        required: true
+      apply:
+        description: "Execute the destroy plan after production approval"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+concurrency:
+  group: terraform-production
+  cancel-in-progress: false
+
+jobs:
+  confirm:
+    name: Confirm destruction request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch and confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Run this workflow from main."
+            exit 1
+          fi
+          if [[ "$CONFIRMATION" != "DESTROY" ]]; then
+            echo "::error::Type DESTROY exactly to confirm deletion."
+            exit 1
+          fi
+
+  plan:
+    name: Terraform Destroy Plan
+    needs: confirm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.5
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Initialize remote backend
+        env:
+          TF_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+          TF_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+          TF_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+          TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+        run: |
+          terraform init -reconfigure -input=false \
+            -backend-config="resource_group_name=${TF_STATE_RESOURCE_GROUP}" \
+            -backend-config="storage_account_name=${TF_STATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=${TF_STATE_CONTAINER}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Create Terraform destroy plan
+        env:
+          TF_VAR_resource_group_name: ${{ vars.RESOURCE_GROUP_NAME }}
+          TF_VAR_location: ${{ vars.LOCATION }}
+          TF_VAR_name_prefix: ${{ vars.NAME_PREFIX }}
+          TF_VAR_container_image: ${{ inputs.container_image }}
+        run: |
+          for variable in "${!TF_VAR_@}"; do
+            if [[ -z "${!variable}" ]]; then
+              unset "$variable"
+            fi
+          done
+          terraform plan -destroy -input=false -no-color -out=destroy.tfplan
+
+      - name: Upload destroy plan and provider lock file
+        uses: actions/upload-artifact@v4
+        with:
+          name: destroy-plan
+          path: |
+            terraform/destroy.tfplan
+            terraform/.terraform.lock.hcl
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Publish destroy plan in job summary
+        run: |
+          {
+            echo "## Terraform destroy plan"
+            echo
+            echo "**Warning:** Applying this plan deletes deployment resources and can permanently lose data."
+            echo
+            echo '```terraform'
+            terraform show -no-color destroy.tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  destroy:
+    name: Terraform Destroy
+    needs: plan
+    if: ${{ inputs.apply }}
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Download destroy plan and provider lock file
+        uses: actions/download-artifact@v4
+        with:
+          name: destroy-plan
+          path: terraform
+
+      - name: Verify destroy artifacts
+        run: |
+          for artifact in destroy.tfplan .terraform.lock.hcl; do
+            if [[ ! -s "$artifact" ]]; then
+              echo "::error::Missing or empty destroy artifact: $artifact"
+              exit 1
+            fi
+          done
+
+      - name: Initialize remote backend
+        env:
+          TF_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+          TF_STATE_STORAGE_ACCOUNT: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+          TF_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
+          TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+        run: |
+          terraform init -reconfigure -input=false -lockfile=readonly \
+            -backend-config="resource_group_name=${TF_STATE_RESOURCE_GROUP}" \
+            -backend-config="storage_account_name=${TF_STATE_STORAGE_ACCOUNT}" \
+            -backend-config="container_name=${TF_STATE_CONTAINER}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Apply saved destroy plan
+        run: terraform apply -input=false -auto-approve destroy.tfplan
