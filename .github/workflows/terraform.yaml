@@ -92,11 +92,15 @@ jobs:
           done
           terraform plan -input=false -no-color -out=tfplan
 
-      - name: Upload plan artifact
+      - name: Upload plan and provider lock file
         uses: actions/upload-artifact@v4
         with:
           name: tfplan
-          path: terraform/tfplan
+          path: |
+            terraform/tfplan
+            terraform/.terraform.lock.hcl
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 1
 
       - name: Publish plan in job summary
@@ -141,6 +145,21 @@ jobs:
           tenant-id: ${{ env.ARM_TENANT_ID }}
           subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
         
+      - name: Download plan and provider lock file
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform
+
+      - name: Verify deployment artifacts
+        run: |
+          for artifact in tfplan .terraform.lock.hcl; do
+            if [[ ! -s "$artifact" ]]; then
+              echo "::error::Missing or empty deployment artifact: $artifact"
+              exit 1
+            fi
+          done
+
       - name: Initialize remote backend
         env:
           TF_STATE_RESOURCE_GROUP: ${{ vars.TF_STATE_RESOURCE_GROUP }}
@@ -155,11 +174,5 @@ jobs:
             -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="use_azuread_auth=true"
       
-      - name: Download plan artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: tfplan
-          path: terraform
-        
       - name: Apply Terraform plan
         run: terraform apply -input=false -auto-approve tfplan
