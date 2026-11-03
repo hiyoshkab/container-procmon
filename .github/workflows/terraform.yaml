@@ -70,7 +70,7 @@ jobs:
           TF_STATE_CONTAINER: ${{ vars.TF_STATE_CONTAINER }}
           TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
         run: |
-          terraform init -reconfigure -input=false -lockfile=readonly \
+          terraform init -reconfigure -input=false \
             -backend-config="resource_group_name=${TF_STATE_RESOURCE_GROUP}" \
             -backend-config="storage_account_name=${TF_STATE_STORAGE_ACCOUNT}" \
             -backend-config="container_name=${TF_STATE_CONTAINER}" \
