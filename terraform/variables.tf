@@ -19,7 +19,6 @@ variable "name_prefix" {
 variable "container_image" {
   type        = string
   description = "Fully qualified container image, e.g. <acr>.azurecr.io/container-procmon:latest."
-  default     = "docker.io/hiyoshkab/procmon:v3"
 }
 
 variable "container_cpu" {
