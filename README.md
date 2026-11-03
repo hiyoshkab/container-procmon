@@ -4,6 +4,24 @@
 
 These PaaS services don't expose the underlying nodes, so per-process metrics have to be gathered from within the app itself. Since you also can't reliably target individual instances or replicas, `procmon` pushes metrics out rather than relying on the traditional Prometheus pull model.
 
+## Architecture
+![Architecture Diagram](./architecture.png)
+
+The metrics pipeline uses a push-based model:
+
+1. **procmon** runs alongside the application, sampling CPU and memory
+   usage for each process.
+2. **OpenTelemetry Collector** receives metrics over OTLP/gRPC,
+   batches them, and forwards them using Prometheus Remote Write.
+3. **Prometheus** stores the metrics and exposes an HTTP query API.
+4. **Grafana** queries Prometheus to visualize process resource usage.
+
+> **Production Considerations**:
+>  This architecture is not backed by persistent storage and data will be lost when replicas are terminated. For production, consider using Managed Prometheus and Managed Grafana. 
+
+## Demo
+![Grafana](./grafana.png)
+
 ## Metrics
 
 | Metric | OTel name | Unit | Description |
@@ -16,7 +34,7 @@ Each sample is tagged with `instance_id`, `pid`, and `name`. The `instance_id` i
 
 ## How it works
 
-- Reads process stats directly from `/proc` — no cgo, no external dependencies.
+- Reads process stats directly from `/proc`. No cgo, no external dependencies.
 - Determines the memory limit from cgroups v2 (`memory.max`), falling back to v1 (`memory.limit_in_bytes`). If these are not present, memory utilization will report as zero.
 - Emits metrics via OTLP/gRPC to a collector, or to stdout for local runs.
 
@@ -118,16 +136,7 @@ with issuer `https://token.actions.githubusercontent.com`, audience
 | Plan on `main` | `repo:hiyoshkab/container-procmon:ref:refs/heads/main` |
 | Apply in `production` | `repo:hiyoshkab/container-procmon:environment:production` |
 
-Run manual workflows from `main` to match the plan credential. Configure approval
-and deployment branch restrictions for the GitHub `production` environment.
-Grant the identity appropriate deployment permissions and **Storage Blob Data
-Contributor** on the state container. If the Terraform configuration manages role
-assignments, it also needs permission to create those assignments.
-
-Once OIDC is configured and verified, remove the unused `AZURE_CREDENTIALS` GitHub
-secret and revoke its old client secret if no other workload uses it. See
-[Microsoft's OIDC setup guide](https://learn.microsoft.com/en-us/azure/developer/github/connect-from-azure-openid-connect)
-and [Terraform's Azure backend authentication guide](https://developer.hashicorp.com/terraform/language/backend/azurerm).
+Configure approval and deployment branch restrictions for the GitHub `production` environment.
 
 ### Grafana dashboard
 
