@@ -77,6 +77,93 @@ terraform init
 terraform apply
 ```
 
+### Automated deployments and rollback
+
+The [Build workflow](.github/workflows/build.yaml) builds and pushes an image to
+Docker Hub when application, build, or Terraform files change on `main`. It calls
+the reusable [Terraform workflow](.github/workflows/terraform.yaml) with the pushed
+image's exact digest. Terraform plans automatically; apply waits for approval if
+required reviewers are configured on the GitHub `production` environment. Configure
+those reviewers before enabling this pipeline if deployments must be approved.
+
+Configure the `DOCKERHUB_REPO` repository variable (the namespace before `/procmon`)
+and the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. The image must be publicly
+pullable with the current Terraform configuration; private repositories require
+Container Apps registry authentication.
+
+The apply job records the image digest in its summary and checks the application's
+`/health` endpoint. A failed check fails the deployment job but does not automatically
+roll back an already applied image. Verify telemetry separately. The health check
+requires the application URL to be reachable from the GitHub-hosted runner.
+
+To roll back:
+
+1. Copy the image reference from a previous successful apply job's summary.
+2. Run **Actions > Terraform > Run workflow** on `main`.
+3. Set `container_image` to that `repository@sha256:digest` reference and enable
+   `apply`. Leave `apply` disabled to generate a plan only.
+4. Review and approve the new plan, then verify the health check and telemetry.
+
+Rollback changes the application image using the current Terraform configuration;
+it does not restore old infrastructure, secrets, or persistent data. Retain
+previously deployed images in Docker Hub. Manual runs always require an explicit
+digest, including infrastructure-only deployments, so they cannot silently use a
+stale image variable. To change infrastructure without changing the image, use
+the currently deployed digest in a manual Terraform run.
+
+Build workflow dispatches outside `main` only build the image; Terraform deployments
+run only on `main`. Production Terraform runs are serialized.
+
+### GitHub Actions Terraform variables
+
+The [Terraform workflow](.github/workflows/terraform.yaml) forwards these optional
+GitHub repository variables to Terraform:
+
+- `RESOURCE_GROUP_NAME`, `LOCATION`, `NAME_PREFIX`
+
+Other optional inputs in [terraform/variables.tf](terraform/variables.tf) use their
+declared defaults and can be configured locally or explicitly added to the plan
+step's environment.
+`container_image` comes from the required workflow input, not a `CONTAINER_IMAGE`
+repository variable.
+
+Unset or empty forwarded variables use Terraform's declared defaults.
+
+The workflow also requires the `TF_STATE_RESOURCE_GROUP`, `TF_STATE_STORAGE_ACCOUNT`,
+`TF_STATE_CONTAINER`, and `TF_STATE_KEY` repository variables for its remote backend.
+Apply uses the saved plan, so Terraform input variables are only supplied during
+planning.
+
+### GitHub Actions Azure authentication
+
+The workflow uses OpenID Connect (OIDC) for Azure Login and Terraform, with no
+client secret. Configure these GitHub repository secrets:
+
+- `AZURE_CLIENT_ID`: application/client ID of a Microsoft Entra application or
+  user-assigned managed identity.
+- `AZURE_TENANT_ID`: Microsoft Entra tenant ID.
+- `AZURE_SUBSCRIPTION_ID`: target Azure subscription ID.
+
+On that application or managed identity, create two federated identity credentials
+with issuer `https://token.actions.githubusercontent.com`, audience
+`api://AzureADTokenExchange`, and these subjects:
+
+| Job | Subject |
+| --- | --- |
+| Plan on `main` | `repo:hiyoshkab/container-procmon:ref:refs/heads/main` |
+| Apply in `production` | `repo:hiyoshkab/container-procmon:environment:production` |
+
+Run manual workflows from `main` to match the plan credential. Configure approval
+and deployment branch restrictions for the GitHub `production` environment.
+Grant the identity appropriate deployment permissions and **Storage Blob Data
+Contributor** on the state container. If the Terraform configuration manages role
+assignments, it also needs permission to create those assignments.
+
+Once OIDC is configured and verified, remove the unused `AZURE_CREDENTIALS` GitHub
+secret and revoke its old client secret if no other workload uses it. See
+[Microsoft's OIDC setup guide](https://learn.microsoft.com/en-us/azure/developer/github/connect-from-azure-openid-connect)
+and [Terraform's Azure backend authentication guide](https://developer.hashicorp.com/terraform/language/backend/azurerm).
+
 ### Grafana dashboard
 
 Import [grafana/aca-health.json](grafana/aca-health.json) manually through the Grafana UI: **Dashboards → New → Import**, upload the file, and select your Prometheus datasource when prompted. It includes CPU utilization, memory utilization, and RSS panels keyed by `{{instance_id}}:{{name}}({{pid}})`.
