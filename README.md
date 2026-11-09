@@ -72,9 +72,8 @@ docker run -p 8080:8080 procmon
 
 The test app exposes endpoints to drive load:
 
-- `GET /cpu?seconds=10&workers=4` — burn CPU across multiple cores.
-- `GET /mem?seconds=10&mb=128` — allocate and hold memory.
-- `GET /health` — health check.
+- `GET /cpu?seconds=10&workers=4`: burn CPU across multiple cores.
+- `GET /mem?seconds=10&mb=128`: allocate and hold memory.
 
 To run `procmon` standalone against the host's `/proc`:
 
