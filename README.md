@@ -16,8 +16,9 @@ The metrics pipeline uses a push-based model:
 3. **Prometheus** stores the metrics and exposes an HTTP query API.
 4. **Grafana** queries Prometheus to visualize process resource usage.
 
-> **Production Considerations**:
->  This architecture is not backed by persistent storage and data will be lost when replicas are terminated. For production, consider using Managed Prometheus and Managed Grafana. 
+> **Notes**:
+> - This architecture is not backed by persistent storage and data will be lost when replicas are terminated. For a real scenario, consider using Managed Prometheus and Managed Grafana. 
+> - Grafana endpoint is exposed publicly for easier access for this demo. This should be limited to private network for a real use case.
 
 ## Demo
 ![Grafana](./grafana.png)
