@@ -26,15 +26,15 @@ The metrics pipeline uses a push-based model:
 
 | Metric | OTel name | Unit | Description |
 | --- | --- | --- | --- |
-| CPU utilization | `process.cpu.utilization` | ratio `[0,1]` | Per-process CPU usage since the last sample, derived from `/proc/<pid>/stat` ticks. |
-| Memory utilization | `process.memory.utilization` | ratio `[0,1]` | RSS relative to the container's cgroup memory limit. |
+| CPU utilization | `process.cpu.utilization` | ratio `0.0 - 1.0` | Per-process CPU usage since the last sample, derived from `/proc/<pid>/stat` ticks. |
+| Memory utilization | `process.memory.utilization` | ratio `0.0 - 1.0` | RSS relative to the container's cgroup memory limit. |
 | Memory RSS | `process.memory.rss` | bytes | Resident set size of the process. |
 
 Each sample is tagged with `instance_id`, `pid`, and `name`. The `instance_id` is auto-detected from the Azure environment (`CONTAINER_APP_REPLICA_NAME` on Container Apps, `COMPUTERNAME` on App Service).
 
 ## How it works
 
-- Reads process stats directly from `/proc`. No cgo, no external dependencies.
+- Reads process stats directly from `/proc`.
 - Determines the memory limit from cgroups v2 (`memory.max`), falling back to v1 (`memory.limit_in_bytes`). If these are not present, memory utilization will report as zero.
 - Emits metrics via OTLP/gRPC to a collector, or to stdout for local runs.
 
@@ -46,7 +46,7 @@ Each sample is tagged with `instance_id`, `pid`, and `name`. The `instance_id` i
 | --- | --- | --- |
 | `SAMPLE_INTERVAL` | `1m` | Sampling period (Go duration, e.g. `10s`, `30s`, `1m`). |
 | `LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, or `error`. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP/gRPC endpoint. If unset, metrics are printed to stdout. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | - | OTLP/gRPC endpoint. If unset, metrics are printed to stdout. |
 
 ## Project layout
 
@@ -141,9 +141,3 @@ Configure approval and deployment branch restrictions for the GitHub `production
 ### Grafana dashboard
 
 Import [grafana/aca-health.json](grafana/aca-health.json) manually through the Grafana UI: **Dashboards → New → Import**, upload the file, and select your Prometheus datasource when prompted. It includes CPU utilization, memory utilization, and RSS panels keyed by `{{instance_id}}:{{name}}({{pid}})`.
-
-## Requirements
-
-- Go 1.26+
-- Docker
-- Terraform ~> 1.15 and the Azure CLI (for deployment)
