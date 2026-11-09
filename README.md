@@ -87,11 +87,12 @@ With no `OTEL_EXPORTER_OTLP_ENDPOINT` set, metrics print to stdout.
 
 ## Deploy to Azure
 
-The `terraform/` directory provisions a full observability stack on Azure Container Apps: the procmon app, an OpenTelemetry Collector, Prometheus (remote-write receiver), and Grafana.
+The `terraform/` directory provisions a full observability stack on Azure Container Apps: the procmon app, an OpenTelemetry Collector, Prometheus (remote-write receiver), and Grafana (Each component deployed as a seperate Container App).
 
+Run the `tf-create-backend.sh` if you need to bootstrap creation of a remote backend. Otherwise, just run terraform locally.
 ```sh
-cd terraform
 terraform init
+terraform plan
 terraform apply
 ```
 
@@ -105,12 +106,6 @@ repository variables matching the uppercase names in
 - `CONTAINER_IMAGE`, `CONTAINER_CPU`, `CONTAINER_MEMORY`
 - `SAMPLE_INTERVAL`, `LOG_LEVEL`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_CONFIG`
 - `VNET_ADDRESS_SPACE`, `ACA_INFRA_SUBNET_PREFIXES`, `ACA_INTERNAL_ONLY`, `TAGS`
-
-Unset or empty variables use Terraform's declared defaults. Use JSON arrays for
-`VNET_ADDRESS_SPACE` and `ACA_INFRA_SUBNET_PREFIXES` (e.g. `["10.0.0.0/16"]`), a JSON
-object for `TAGS` (e.g. `{"environment":"production"}`), a number for `CONTAINER_CPU`,
-and `true` or `false` for `ACA_INTERNAL_ONLY`. `OTEL_CONFIG` accepts the collector
-configuration as a YAML string.
 
 The workflow also requires the `TF_STATE_RESOURCE_GROUP`, `TF_STATE_STORAGE_ACCOUNT`,
 `TF_STATE_CONTAINER`, and `TF_STATE_KEY` repository variables for its remote backend.
