@@ -59,7 +59,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}
-          severity:CRITICAL
+          severity: CRITICAL
           ignore-unfixed: true
           exit-code: "1"
 
