@@ -1,6 +1,6 @@
 # container-procmon
 
-`procmon` is a lightweight, per-process resource monitor for **Container Apps** and **App Service on Linux**, written in Go. It samples every process under `/proc`, computes CPU and memory utilization (similar to `ps`), and exports the results as OpenTelemetry metrics. It runs as a standalone binary alongside your app. See the [Dockerfile](Dockerfile) for how to build it and inject it into your image.
+`procmon` is a lightweight, per-process resource monitor for **Container Apps** and **App Service on Linux**, written in Go. It samples every process under `/proc`, computes CPU and memory utilization, and exports the results as OpenTelemetry metrics. It runs as a standalone binary alongside your app. See the [Dockerfile](Dockerfile) for how to build it and inject it into your image.
 
 These PaaS services don't expose the underlying nodes, so per-process metrics have to be gathered from within the app itself. Since you also can't reliably target individual instances or replicas, `procmon` pushes metrics out rather than relying on the traditional Prometheus pull model.
 
@@ -16,7 +16,7 @@ The metrics pipeline uses a push-based model:
 3. **Prometheus** stores the metrics and exposes an HTTP query API.
 4. **Grafana** queries Prometheus to visualize process resource usage.
 
-> **Notes**:
+> **Production Considerations**:
 >  This architecture is not backed by persistent storage and data will be lost when replicas are terminated. For production, consider using Managed Prometheus and Managed Grafana. 
 
 ## Demo
@@ -46,7 +46,7 @@ Each sample is tagged with `instance_id`, `pid`, and `name`. The `instance_id` i
 | --- | --- | --- |
 | `SAMPLE_INTERVAL` | `1m` | Sampling period (Go duration, e.g. `10s`, `30s`, `1m`). |
 | `LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, or `error`. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | - | OTLP/gRPC endpoint. If unset, metrics are printed to stdout. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP/gRPC endpoint. If unset, metrics are printed to stdout. |
 
 ## Project layout
 
@@ -142,3 +142,8 @@ Configure approval and deployment branch restrictions for the GitHub `production
 
 Import [grafana/aca-health.json](grafana/aca-health.json) manually through the Grafana UI: **Dashboards → New → Import**, upload the file, and select your Prometheus datasource when prompted. It includes CPU utilization, memory utilization, and RSS panels keyed by `{{instance_id}}:{{name}}({{pid}})`.
 
+## Requirements
+
+- Go 1.26+
+- Docker
+- Terraform ~> 1.15 and the Azure CLI (for deployment)
